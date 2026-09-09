@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "giga-stt"
+version = "1.0.0"
+description = "REST speech-to-text service based on the GigaAM-v3-e2e-rnnt model"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Nikolay Puzanov" }]
+
+dependencies = [
+    # torch 2.8.0 — recommended version from the model card (PyPI wheel = cu128)
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+    # GigaAM package pinned to a working commit (the service uses its internal module API)
+    "gigaam @ git+https://github.com/salute-developers/GigaAM.git@7447938d791c4f3e643386ee22c33777004293a5",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.12",
+    "soundfile>=0.12",
+    "silero-vad>=5.1",
+]
+
+[project.scripts]
+giga-stt = "giga_stt.cli:main"
+
+[project.optional-dependencies]
+# Official longform backend (pyannote VAD): requires an HF_TOKEN with access to the
+# gated pyannote/segmentation-3.0 model. Upgrades torch — see the README.
+longform = [
+    "numba>=0.62",
+    "pyannote.audio==4.0.*",
+    "pyarrow>=23",
+    "torchcodec>=0.10",
+    "transformers>=5",
+]
+
+[project.urls]
+UpstreamModel = "https://github.com/salute-developers/GigaAM"
+ModelCard = "https://huggingface.co/ai-sage/GigaAM-v3"
+
+[tool.setuptools.packages.find]
+include = ["giga_stt*"]
+
+[tool.pytest.ini_options]
+addopts = "-q"

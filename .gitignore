@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pi/
+
+.venv
+venv
+
+# checkpoints and caches do not belong here
+.models/
+*.ckpt
+*.wav
+*.mp3
+*.ogg
+*.log
+
+.pytest_cache
+.mypy_cache
+.cache
+.idea/
+.vscode/

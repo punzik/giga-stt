@@ -1,0 +1,34 @@
+services:
+  giga-stt:
+    build: .
+    container_name: giga-stt
+    ports:
+      - "8000:8000"
+    environment:
+      # Model: v3_e2e_rnnt (default), v3_rnnt, v3_ctc, v3_e2e_ctc…
+      GIGAAM_MODEL: v3_e2e_rnnt
+      # auto | cuda | cpu
+      GIGAAM_DEVICE: auto
+      # Uncomment for the official longform backend (pyannote):
+      # HF_TOKEN: hf_xxx
+      # GIGAAM_VAD_BACKEND: pyannote
+      # Limits/performance (example values):
+      # GIGAAM_MAX_UPLOAD_MB: "100"
+      # GIGAAM_FR_BATCH_SIZE: "4"   # increase for GPUs with more VRAM
+      # GIGAAM_API_KEY: secret-key  # enable X-API-Key authentication
+    volumes:
+      - giga-stt-models:/models
+    restart: unless-stopped
+    # --- NVIDIA GPU -------------------------------------------------------
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # For a CPU-only run, comment out the deploy block above and set:
+    #   GIGAAM_DEVICE: cpu
+
+volumes:
+  giga-stt-models:
