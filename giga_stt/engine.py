@@ -33,7 +33,7 @@ from torch.utils.data import DataLoader
 import gigaam
 from gigaam import load_audio, load_model
 from gigaam.model import LONGFORM_THRESHOLD
-from gigaam.types import Segment, Word
+from gigaam.types import Segment
 from gigaam.utils import AudioDataset
 
 from .chunking import make_chunks
@@ -79,7 +79,6 @@ class TranscriptionOutput:
     text: str
     duration: float
     segments: list
-    words: Optional[list]
     vad_backend: Optional[str]
     inference_time: float
 
@@ -255,7 +254,7 @@ class SpeechEngine:
             warmup_path = Path(tempfile.gettempdir()) / "giga-stt-warmup.wav"
             if not warmup_path.exists():
                 sf.write(warmup_path, torch.zeros(SAMPLE_RATE).numpy(), SAMPLE_RATE)
-            self.transcribe_file(str(warmup_path), word_timestamps=False)
+            self.transcribe_file(str(warmup_path))
             logger.info("Inference warmup done")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Warmup failed (non-critical): %s", exc)
@@ -272,7 +271,7 @@ class SpeechEngine:
         return self.model.encoder(features, feature_lengths)
 
     @torch.inference_mode()
-    def transcribe_file(self, audio_path: str, word_timestamps: bool = False) -> TranscriptionOutput:
+    def transcribe_file(self, audio_path: str) -> TranscriptionOutput:
         t0 = time.monotonic()
         duration = self._probe_duration(audio_path)
         if duration > self.settings.max_audio_sec:
@@ -283,9 +282,7 @@ class SpeechEngine:
 
         if duration <= SHORT_LIMIT_SEC:
             try:
-                segments, vad_backend = self._transcribe_short(
-                    audio_path, word_timestamps, duration
-                )
+                segments, vad_backend = self._transcribe_short(audio_path, duration)
             except AudioDecodeError:
                 raise
             except RuntimeError as exc:
@@ -293,41 +290,31 @@ class SpeechEngine:
                     raise AudioDecodeError(str(exc)) from exc
                 raise
         else:
-            segments, vad_backend = self._transcribe_long(audio_path, word_timestamps)
-
-        words = None
-        if word_timestamps:
-            words = [w for seg in segments for w in (seg.words or [])]
+            segments, vad_backend = self._transcribe_long(audio_path)
         text = " ".join(seg.text.strip() for seg in segments if seg.text.strip())
         return TranscriptionOutput(
             text=text,
             duration=duration,
             segments=segments,
-            words=words,
             vad_backend=vad_backend,
             inference_time=time.monotonic() - t0,
         )
 
     # -- short audio ---------------------------------------------------------
 
-    def _transcribe_short(self, audio_path: str, word_timestamps: bool, duration: float):
+    def _transcribe_short(self, audio_path: str, duration: float):
         """Single model pass over audio ≤ 25 s (without model.transcribe — see _forward)."""
         wav = _load_audio_verbose(audio_path)
         wav = wav.to(self.device).unsqueeze(0)
         lengths = torch.tensor([wav.shape[-1]], device=self.device)
         encoded, encoded_len = self._forward(wav, lengths)
-        text, words = self.model._decode(encoded, encoded_len, lengths, word_timestamps)[0]
-        segment = Segment(
-            text=text,
-            start=0.0,
-            end=round(duration, 3),
-            words=words if word_timestamps else None,
-        )
+        text, _ = self.model._decode(encoded, encoded_len, lengths, False)[0]
+        segment = Segment(text=text, start=0.0, end=round(duration, 3))
         return [segment], None
 
     # -- long audio ----------------------------------------------------------
 
-    def _transcribe_long(self, audio_path: str, word_timestamps: bool):
+    def _transcribe_long(self, audio_path: str):
         if self.vad_backend == "pyannote":
             try:
                 # Official pyannote segmentation + our own batched decode
@@ -341,9 +328,7 @@ class SpeechEngine:
                 if not segments:
                     return [], "pyannote"
                 return (
-                    self._batched_decode(
-                        segments, boundaries, word_timestamps, "pyannote"
-                    ),
+                    self._batched_decode(segments, boundaries),
                     "pyannote",
                 )
             except Exception as exc:  # noqa: BLE001
@@ -358,9 +343,9 @@ class SpeechEngine:
         )
         if not segments_tensors:
             return [], used
-        return self._batched_decode(segments_tensors, boundaries, word_timestamps, used), used
+        return self._batched_decode(segments_tensors, boundaries), used
 
-    def _batched_decode(self, segment_tensors, boundaries, word_timestamps: bool, backend: str):
+    def _batched_decode(self, segment_tensors, boundaries):
         """Batched chunk inference (mirrors the internal loop of model.transcribe_longform).
 
         On NaN in a batch (fp16 numerical quirks on some GPUs), the request is
@@ -386,35 +371,14 @@ class SpeechEngine:
                                idx, idx + len(wav_lens) - 1)
                 for k in range(idx, idx + len(wav_lens)):
                     result_segments.extend(
-                        self._batched_decode(
-                            [segment_tensors[k]], [boundaries[k]], word_timestamps, backend
-                        )
+                        self._batched_decode([segment_tensors[k]], [boundaries[k]])
                     )
                 idx += len(wav_lens)
                 continue
-            for text, words in self.model._decode(
-                encoded, encoded_len, wav_lens, word_timestamps
-            ):
+            for text, _ in self.model._decode(encoded, encoded_len, wav_lens, False):
                 seg_start, seg_end = boundaries[idx]
                 idx += 1
-                if word_timestamps:
-                    result_segments.append(
-                        Segment(
-                            text=text,
-                            start=seg_start,
-                            end=seg_end,
-                            words=[
-                                Word(
-                                    text=w.text,
-                                    start=round(w.start + seg_start, 3),
-                                    end=round(w.end + seg_start, 3),
-                                )
-                                for w in words or []
-                            ],
-                        )
-                    )
-                else:
-                    result_segments.append(Segment(text=text, start=seg_start, end=seg_end))
+                result_segments.append(Segment(text=text, start=seg_start, end=seg_end))
         return result_segments
 
     # ------------------------------------------------------------- utilities

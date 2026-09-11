@@ -1,9 +1,9 @@
 # giga-stt
 
-HTTP speech-to-text service based on
-[GigaAM-v3-e2e-rnnt](https://huggingface.co/ai-sage/GigaAM-v3) — SOTA ASR models
-for Russian with punctuation and text normalization
-(upstream: [salute-developers/GigaAM](https://github.com/salute-developers/GigaAM), MIT license).
+HTTP speech-to-text service with two recognition backends:
+[GigaAM-v3-e2e-rnnt](https://huggingface.co/ai-sage/GigaAM-v3) for Russian
+and [IBM Granite Speech TurboCTC](https://huggingface.co/ibm-granite/granite-speech-5.0-470m-turboctc)
+for English.
 
 * Request format: **multipart/form-data** (`POST /v1/transcribe`) or a raw byte
   stream (`POST /v1/transcribe-raw`).
@@ -11,7 +11,7 @@ for Russian with punctuation and text normalization
   (wav, mp3, ogg/opus, m4a, flac, webm, amr…), mono/stereo.
 * Up to 25 seconds — a single model pass; longer audio — automatic segmentation
   into chunks by voice activity and batched inference.
-* Optional word timestamps (`word_timestamps=true`).
+* Select Russian (default) or English with the `language` parameter.
 * GPU acceleration (CUDA) or CPU; interactive Swagger UI docs at `/docs`.
 
 ---
@@ -24,7 +24,7 @@ for Russian with punctuation and text normalization
 {
   "status": "ready",
   "version": "1.0.0",
-  "model": "v3_e2e_rnnt",
+  "model": "ru: v3_e2e_rnnt; en: ibm-granite/granite-speech-5.0-470m-turboctc",
   "device": "cuda",
   "torch": "2.8.0+cu128",
   "vad_backend": "silero",
@@ -33,21 +33,25 @@ for Russian with punctuation and text normalization
 }
 ```
 
-Statuses: `loading` — the model is being downloaded/loaded; `ready` — you can send audio;
-`error` — the model failed to load (the reason is in `detail`).
+The Russian and English models load in the background. Statuses: `loading` — a model is
+being downloaded/loaded; `ready` — you can send requests for both languages; `error` — a
+model failed to load (the reason is in `detail`).
+
+`language=ru` uses GigaAM with Russian speech; `language=en` uses IBM Granite and accepts
+English speech only.
 
 ### `POST /v1/transcribe` (multipart/form-data)
 
 | Field             | Type | Default    | Description                       |
 |-------------------|------|------------|-----------------------------------|
 | `file`            | file | —          | Audio                             |
-| `word_timestamps` | bool | `false`    | Word timestamps                   |
+| `language`        | `ru` / `en` | `ru`       | Recognition language              |
 | `with_segments`   | bool | `true`     | Include the segment list          |
 
 ### `POST /v1/transcribe-raw` (raw body)
 
 The request body is the raw audio bytes, `Content-Type: audio/wav|audio/mpeg|audio/ogg|…`,
-same parameters but in the query string: `?word_timestamps=true&with_segments=true`.
+same parameters but in the query string: `?language=en&with_segments=true`.
 
 ### Response
 
@@ -60,15 +64,12 @@ same parameters but in the query string: `?word_timestamps=true&with_segments=tr
   "vad_backend": null,
   "processing_time": 0.61,
   "segments": [
-    {"text": "Hello! How are you?", "start": 0.0, "end": 2.73, "words": null}
-  ],
-  "words": null
+    {"text": "Hello! How are you?", "start": 0.0, "end": 2.73}
+  ]
 }
 ```
 
-* `segments` — for long audio: segments `[start, end)` with text
-  (and words, if timestamps were requested).
-* `words` — flat list of words with timestamps (only when `word_timestamps=true`).
+* `segments` — for long audio: segments `[start, end)` with text.
 * `vad_backend` — which segmentation backend was used
   (set only for audio longer than 25 s).
 
@@ -94,9 +95,9 @@ same parameters but in the query string: `?word_timestamps=true&with_segments=tr
 curl -s -X POST http://localhost:8000/v1/transcribe \
   -F "file=@voice.wav" | jq -r .text
 
-# with word timestamps
+# English transcription
 curl -s -X POST http://localhost:8000/v1/transcribe \
-  -F "file=@voice.mp3" -F "word_timestamps=true" | jq
+  -F "file=@voice.mp3" -F "language=en" | jq
 
 # raw stream
 curl -s -X POST http://localhost:8000/v1/transcribe-raw \
@@ -111,7 +112,7 @@ import requests
 r = requests.post(
     "http://localhost:8000/v1/transcribe",
     files={"file": open("voice.wav", "rb")},
-    data={"word_timestamps": "true"},
+    data={"language": "en"},
     timeout=600,
 )
 r.raise_for_status()
@@ -131,7 +132,7 @@ with open("call_center.ogg", "rb") as f:
         "http://localhost:8000/v1/transcribe-raw",
         content=f,
         headers={"Content-Type": "audio/ogg"},
-        params={"word_timestamps": "true"},
+        params={"language": "en"},
         timeout=1800,
     )
 print(r.json()["text"])
@@ -174,7 +175,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 docker compose -f docker/docker-compose.yml logs -f giga-stt
 ```
 
-The weights are cached in the docker volume `giga-stt-models` (`/models` inside
+Both model weights are cached in the docker volume `giga-stt-models` (`/models` inside
 the container); after the first start the container comes up without downloading.
 
 CPU-only: comment out the `deploy` block in `docker/docker-compose.yml` and set
@@ -189,7 +190,9 @@ CPU-only: comment out the `deploy` block in `docker/docker-compose.yml` and set
 | `GIGAAM_MODEL`          | `v3_e2e_rnnt`     | Any GigaAM model: `v3_rnnt`, `v3_ctc`, `v3_e2e_ctc`, … |
 | `GIGAAM_DEVICE`         | `auto`            | `auto` / `cuda` / `cpu` |
 | `GIGAAM_FP16_ENCODER`   | `false`           | fp16 encoder + autocast. ⚠ On GTX 16xx GPUs (TU116/TU117, no tensor cores) cuDNN fp16 convolutions on long inputs (T ≳ 550 frames) produce NaN — do not enable there; on RTX/A100/H100 enabling it speeds up inference |
-| `GIGAAM_CACHE_DIR`      | `~/.cache/gigaam` | Weights directory |
+| `GIGAAM_CACHE_DIR`      | `~/.cache/gigaam` | Russian GigaAM weights directory |
+| `GRANITE_MODEL`         | `ibm-granite/granite-speech-5.0-470m-turboctc` | English model |
+| `GRANITE_CACHE_DIR`     | `~/.cache/huggingface` | English model cache directory |
 | `GIGAAM_MAX_UPLOAD_MB`  | `100`             | Maximum upload size |
 | `GIGAAM_MAX_AUDIO_SEC`  | `7200`            | Safety cap on duration |
 | `GIGAAM_MAX_CONCURRENCY`| `1`               | Concurrent inferences (the rest wait in the queue) |

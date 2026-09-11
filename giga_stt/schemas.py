@@ -2,42 +2,30 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from . import __version__
 
 
-class WordOut(BaseModel):
-    text: str = Field(..., examples=["hello"])
-    start: float = Field(..., description="Word start, seconds")
-    end: float = Field(..., description="Word end, seconds")
-
-
 class SegmentOut(BaseModel):
     text: str
     start: float = Field(..., description="Segment start, seconds (0 for short audio)")
     end: float = Field(..., description="Segment end, seconds")
-    words: Optional[List[WordOut]] = Field(
-        None, description="Words with timestamps (if word_timestamps=true)"
-    )
 
 
 class TranscriptionResponse(BaseModel):
-    text: str = Field(..., description="Final transcript (for e2e models — with punctuation)")
+    text: str = Field(..., description="Final transcript")
     duration: float = Field(..., description="Audio duration, seconds")
     language: str = Field("ru", description="Model language")
-    model: str = Field(..., description="GigaAM model name")
+    model: str = Field(..., description="Recognition model name")
     vad_backend: Optional[str] = Field(
         None, description="Segmentation backend (for audio longer than 25 s)"
     )
     processing_time: float = Field(..., description="Inference time, seconds")
-    segments: Optional[List[SegmentOut]] = Field(
+    segments: Optional[list[SegmentOut]] = Field(
         None, description="Segments (for audio longer than 25 s)"
-    )
-    words: Optional[List[WordOut]] = Field(
-        None, description="Flat list of words with timestamps (if word_timestamps=true)"
     )
 
 

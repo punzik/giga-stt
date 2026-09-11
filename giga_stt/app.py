@@ -22,14 +22,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 
 from . import __version__
 from .config import Settings
 from .engine import AudioDecodeError, AudioTooLongError
-from .schemas import HealthResponse, ServiceInfo, SegmentOut, TranscriptionResponse, WordOut
+from .schemas import HealthResponse, ServiceInfo, SegmentOut, TranscriptionResponse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger("gigaam-stt")
 
 settings = Settings.from_env()
-engine: Optional["SpeechEngine"] = None  # noqa: F821 — initialized in lifespan
+engines: dict[str, object] = {}
 
 AUDIO_CT_SUFFIX = {
     "audio/wav": ".wav",
@@ -67,10 +67,16 @@ def _build_engine() -> "SpeechEngine":
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global engine
-    engine = _build_engine()
-    engine.start_loading()
-    logger.info("Service starting; model %s is loading in the background", settings.model_name)
+    from .granite_engine import GraniteSpeechEngine
+
+    global engines
+    engines = {
+        "ru": _build_engine(),
+        "en": GraniteSpeechEngine(settings),
+    }
+    for language, engine in engines.items():
+        engine.start_loading()
+        logger.info("Service starting; %s model is loading in the background", language)
     try:
         yield
     finally:
@@ -80,12 +86,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="GigaAM Speech-to-Text",
     description=(
-        "Speech-to-text REST service based on the "
-        f"[{settings.model_name}](https://github.com/salute-developers/GigaAM) model. "
-        "Audio up to 25 s is transcribed in a single pass; longer audio is "
-        "automatically segmented into chunks by voice activity and "
-        "transcribed in batches. Text is returned with punctuation and normalization "
-        "(e2e model)."
+        "Speech-to-text REST service. Use language=ru (default) for GigaAM or "
+        "language=en for IBM Granite Speech TurboCTC. Audio up to 25 s is "
+        "transcribed in a single pass; longer audio is segmented by voice activity."
     ),
     version=__version__,
     lifespan=lifespan,
@@ -111,17 +114,19 @@ def require_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="A valid API key is required (X-API-Key)")
 
 
-def _ensure_engine_ready() -> None:
+def _ensure_engine_ready(language: str) -> object:
+    engine = engines.get(language)
     if engine is None:  # pragma: no cover — requests before lifespan are not served
         raise HTTPException(status_code=503, detail="Service is still initializing")
     if engine.loading_error:
-        raise HTTPException(status_code=500, detail=f"Model failed to load: {engine.loading_error}")
+        raise HTTPException(status_code=500, detail=f"{language} model failed to load: {engine.loading_error}")
     if not engine.ready:
         raise HTTPException(
             status_code=503,
             detail="Model is still loading, please retry the request later",
             headers={"Retry-After": "10"},
         )
+    return engine
 
 
 async def _stream_to_tempfile(filename: Optional[str], chunks: AsyncIterator[bytes]) -> Path:
@@ -158,28 +163,11 @@ async def _upload_stream(upload: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-def _parse_bool(value: object, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
-
-
 def _segment_out(seg) -> SegmentOut:
-    return SegmentOut(
-        text=seg.text,
-        start=round(seg.start, 3),
-        end=round(seg.end, 3),
-        words=[
-            WordOut(text=w.text, start=round(w.start, 3), end=round(w.end, 3))
-            for w in (seg.words or [])
-        ]
-        or None,
-    )
+    return SegmentOut(text=seg.text, start=round(seg.start, 3), end=round(seg.end, 3))
 
 
-async def _run_inference(tmp: Path, word_timestamps: bool, with_segments: bool) -> TranscriptionResponse:
+async def _run_inference(tmp: Path, language: str, with_segments: bool) -> TranscriptionResponse:
     """Queue the request for inference and run it in a worker."""
     loop = asyncio.get_running_loop()
     acquired = False
@@ -198,7 +186,7 @@ async def _run_inference(tmp: Path, word_timestamps: bool, with_segments: bool) 
         t0 = time.monotonic()
         try:
             result = await loop.run_in_executor(
-                executor, engine.transcribe_file, str(tmp), word_timestamps
+                executor, engines[language].transcribe_file, str(tmp)
             )
         except AudioDecodeError as exc:
             raise HTTPException(status_code=400, detail=f"Failed to decode audio: {exc}")
@@ -212,17 +200,11 @@ async def _run_inference(tmp: Path, word_timestamps: bool, with_segments: bool) 
         return TranscriptionResponse(
             text=result.text,
             duration=round(result.duration, 3),
-            language="ru",
-            model=settings.model_name,
+            language=language,
+            model=(settings.model_name if language == "ru" else settings.granite_model_name),
             vad_backend=result.vad_backend,
             processing_time=round(inference, 3),
             segments=[_segment_out(s) for s in result.segments] if with_segments else None,
-            words=[
-                WordOut(text=w.text, start=round(w.start, 3), end=round(w.end, 3))
-                for w in (result.words or [])
-            ]
-            if word_timestamps
-            else None,
         )
     finally:
         if acquired:
@@ -234,23 +216,26 @@ async def _run_inference(tmp: Path, word_timestamps: bool, with_segments: bool) 
 
 @app.get("/", response_model=ServiceInfo)
 async def root() -> ServiceInfo:
-    return ServiceInfo(model=settings.model_name)
+    return ServiceInfo(model=f"ru: {settings.model_name}; en: {settings.granite_model_name}")
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     import torch
 
+    engine = engines.get("ru")
     if engine is None:
         return HealthResponse(status="loading", version=__version__)
+    failed = next((e for e in engines.values() if e.loading_error), None)
+    status = "error" if failed else "ready" if all(e.ready for e in engines.values()) else "loading"
     return HealthResponse(
-        status=engine.status,
-        model=settings.model_name,
+        status=status,
+        model=f"ru: {settings.model_name}; en: {settings.granite_model_name}",
         device=str(engine.device) if engine.device is not None else None,
         torch=torch.__version__,
         vad_backend=engine.vad_backend,
         ffmpeg=str(engine.ffmpeg_path) if engine.ffmpeg_path else None,
-        detail=engine.loading_error,
+        detail=failed.loading_error if failed else None,
     )
 
 
@@ -263,13 +248,13 @@ async def health() -> HealthResponse:
 async def transcribe(
     _: None = Depends(require_api_key),
     file: UploadFile = File(..., description="Audio (wav, mp3, ogg, m4a, flac, webm…)"),
-    word_timestamps: bool = Form(False, description="Return word timestamps"),
+    language: Literal["ru", "en"] = Form("ru", description="Recognition language"),
     with_segments: bool = Form(True, description="Return the segment list"),
 ) -> TranscriptionResponse:
-    _ensure_engine_ready()
+    _ensure_engine_ready(language)
     tmp = await _stream_to_tempfile(file.filename, _upload_stream(file))
     try:
-        return await _run_inference(tmp, word_timestamps, with_segments)
+        return await _run_inference(tmp, language, with_segments)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -293,10 +278,10 @@ async def transcribe(
 async def transcribe_raw(
     request: Request,
     _: None = Depends(require_api_key),
-    word_timestamps: bool = Query(False, description="Return word timestamps"),
+    language: Literal["ru", "en"] = Query("ru", description="Recognition language"),
     with_segments: bool = Query(True, description="Return the segment list"),
 ) -> TranscriptionResponse:
-    _ensure_engine_ready()
+    _ensure_engine_ready(language)
     ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
     filename = (
         os.path.basename(request.headers.get("x-filename", ""))
@@ -304,6 +289,6 @@ async def transcribe_raw(
     )
     tmp = await _stream_to_tempfile(filename, request.stream())
     try:
-        return await _run_inference(tmp, word_timestamps, with_segments)
+        return await _run_inference(tmp, language, with_segments)
     finally:
         tmp.unlink(missing_ok=True)

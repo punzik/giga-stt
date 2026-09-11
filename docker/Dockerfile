@@ -4,7 +4,8 @@ FROM python:3.13-slim-bookworm
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     GIGAAM_MODEL=v3_e2e_rnnt \
-    GIGAAM_CACHE_DIR=/models
+    GIGAAM_CACHE_DIR=/models/gigaam \
+    GRANITE_CACHE_DIR=/models/huggingface
 
 # ffmpeg is needed by gigaam.load_audio (decoding any format),
 # git — so pip can install the gigaam dependency from GitHub,
@@ -20,7 +21,7 @@ COPY giga_stt ./giga_stt
 # torch 2.8.0 separately — stabilizes the cache layer; the rest comes in via pip install .
 RUN pip install torch==2.8.0 torchaudio==2.8.0 && pip install .
 
-# The model (~450 MB) is downloaded into the /models volume on first start.
+# Both language models are downloaded into the /models volume on first start.
 # To make a self-contained image, uncomment the next layer
 # (the build takes longer, but the container works offline):
 # RUN python -c "import gigaam; gigaam.load_model('v3_e2e_rnnt', device='cpu')"

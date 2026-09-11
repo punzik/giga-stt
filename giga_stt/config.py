@@ -28,8 +28,11 @@ class Settings:
     # tensor cores). Disabled by default: on GTX 16xx GPUs (TU116/TU117 — no
     # tensor cores) fp16 cuDNN convolutions on long inputs produce NaN.
     fp16_encoder: bool = False
-    # Checkpoint cache directory (defaults to ~/.cache/gigaam).
+    # GigaAM checkpoint cache directory (defaults to ~/.cache/gigaam).
     cache_dir: str = ""
+    # English IBM Granite CTC model and its Hugging Face cache directory.
+    granite_model_name: str = "ibm-granite/granite-speech-5.0-470m-turboctc"
+    granite_cache_dir: str = ""
 
     # HTTP
     host: str = "0.0.0.0"
@@ -64,6 +67,12 @@ class Settings:
             "~/.cache/gigaam"
         ).expanduser()
 
+    @property
+    def resolved_granite_cache_dir(self) -> Path:
+        return Path(self.granite_cache_dir).expanduser() if self.granite_cache_dir else Path(
+            "~/.cache/huggingface"
+        ).expanduser()
+
     @classmethod
     def from_env(cls) -> "Settings":
         s = cls()
@@ -71,6 +80,8 @@ class Settings:
         s.device = _env("GIGAAM_DEVICE", s.device).lower()
         s.fp16_encoder = _bool(_env("GIGAAM_FP16_ENCODER", "true" if s.fp16_encoder else "false"))
         s.cache_dir = _env("GIGAAM_CACHE_DIR", s.cache_dir)
+        s.granite_model_name = _env("GRANITE_MODEL", s.granite_model_name)
+        s.granite_cache_dir = _env("GRANITE_CACHE_DIR", s.granite_cache_dir)
         s.host = _env("GIGAAM_HOST", s.host)
         s.port = int(_env("GIGAAM_PORT", str(s.port)))
         s.max_upload_mb = int(_env("GIGAAM_MAX_UPLOAD_MB", str(s.max_upload_mb)))

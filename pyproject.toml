@@ -20,6 +20,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.12",
+    # Required by the English IBM Granite Speech TurboCTC backend.
+    "transformers>=5.16.0",
     "soundfile>=0.12",
     "silero-vad>=5.1",
 ]
@@ -35,7 +37,6 @@ longform = [
     "pyannote.audio==4.0.*",
     "pyarrow>=23",
     "torchcodec>=0.10",
-    "transformers>=5",
 ]
 
 [project.urls]
