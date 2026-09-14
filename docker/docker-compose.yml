@@ -1,6 +1,10 @@
 services:
   giga-stt:
-    build: .
+    build:
+      context: .
+      args:
+        # 1 = install the pyannote speaker-diarization dependencies
+        INSTALL_DIARIZATION: "1"
     container_name: giga-stt
     ports:
       - "8000:8000"
@@ -11,9 +15,12 @@ services:
       GRANITE_MODEL: ibm-granite/granite-speech-5.0-470m-turboctc
       # auto | cuda | cpu
       GIGAAM_DEVICE: auto
-      # Uncomment for the official longform backend (pyannote):
+      # HF token — required for diarization and the official longform VAD.
+      # Accept the terms for pyannote/speaker-diarization-community-1 (free, gated).
       # HF_TOKEN: hf_xxx
       # GIGAAM_VAD_BACKEND: pyannote
+      # Speaker diarization (with_speakers=true requests; requires HF_TOKEN above)
+      GIGAAM_DIARIZATION: pyannote
       # Limits/performance (example values):
       # GIGAAM_MAX_UPLOAD_MB: "100"
       # GIGAAM_FR_BATCH_SIZE: "4"   # increase for GPUs with more VRAM

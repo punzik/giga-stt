@@ -38,6 +38,7 @@ from gigaam.utils import AudioDataset
 
 from .chunking import make_chunks
 from .config import Settings
+from .diarization import DiarizationBackend
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,8 @@ class TranscriptionOutput:
     segments: list
     vad_backend: Optional[str]
     inference_time: float
+    # Dominant speaker per segment (aligned with ``segments``), when diarized
+    speakers: Optional[list] = None
 
 
 def _find_binary(name: str) -> Optional[Path]:
@@ -271,7 +274,9 @@ class SpeechEngine:
         return self.model.encoder(features, feature_lengths)
 
     @torch.inference_mode()
-    def transcribe_file(self, audio_path: str) -> TranscriptionOutput:
+    def transcribe_file(
+        self, audio_path: str, diarization: Optional[DiarizationBackend] = None
+    ) -> TranscriptionOutput:
         t0 = time.monotonic()
         duration = self._probe_duration(audio_path)
         if duration > self.settings.max_audio_sec:
@@ -292,12 +297,18 @@ class SpeechEngine:
         else:
             segments, vad_backend = self._transcribe_long(audio_path)
         text = " ".join(seg.text.strip() for seg in segments if seg.text.strip())
+        # Diarization runs over the whole audio (turns can cross ASR chunk boundaries)
+        speakers = None
+        if diarization is not None and segments:
+            wav = _load_audio_verbose(audio_path)
+            speakers = diarization.assign(wav, SAMPLE_RATE, segments)
         return TranscriptionOutput(
             text=text,
             duration=duration,
             segments=segments,
             vad_backend=vad_backend,
             inference_time=time.monotonic() - t0,
+            speakers=speakers,
         )
 
     # -- short audio ---------------------------------------------------------

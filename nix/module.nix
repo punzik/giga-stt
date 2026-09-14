@@ -66,6 +66,17 @@ in
       description = "Chunk batch size (increase for GPUs with more VRAM)";
     };
 
+    diarization = lib.mkOption {
+      type = lib.types.enum [ "off" "pyannote" ];
+      default = "pyannote";
+      description = ''
+        Speaker diarization backend for with_speakers=true requests.
+        pyannote requires an HF_TOKEN with accepted terms for the gated
+        model pyannote/speaker-diarization-community-1 (via environmentFile
+        or extraEnv).
+      '';
+    };
+
     maxUploadMb = lib.mkOption {
       type = lib.types.int;
       default = 100;
@@ -124,6 +135,8 @@ in
         GRANITE_CACHE_DIR = "/var/lib/giga-stt/models/huggingface";
         GIGAAM_VAD_BACKEND = cfg.vadBackend;
         GIGAAM_FR_BATCH_SIZE = toString cfg.frBatchSize;
+        GIGAAM_DIARIZATION = cfg.diarization;
+        PYANNOTE_METRICS_ENABLED = "0";
         GIGAAM_MAX_UPLOAD_MB = toString cfg.maxUploadMb;
         GIGAAM_MAX_AUDIO_SEC = "7200";
       } // cfg.extraEnv;

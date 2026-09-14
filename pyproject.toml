@@ -38,6 +38,13 @@ longform = [
     "pyarrow>=23",
     "torchcodec>=0.10",
 ]
+# Speaker diarization (pyannote/speaker-diarization-community-1, gated, CC-BY-4.0):
+# requires an HF_TOKEN with accepted terms. torchcodec 0.7.x is the build for
+# torch 2.8 (>= 0.10 is paired with newer torch — keep it out of this pin).
+diarization = [
+    "pyannote.audio==4.0.*",
+    "torchcodec==0.7.*",
+]
 
 [project.urls]
 UpstreamModel = "https://github.com/salute-developers/GigaAM"

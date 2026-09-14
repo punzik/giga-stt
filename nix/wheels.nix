@@ -106,4 +106,12 @@ in
     url = "https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl";
     hash = "sha256-/W8/k8mgp8wniO5j+3YzU9S9LomwdRvHj8992gC+p3Q=";
   };
+  # The C extension of torchcodec is paired with a specific torch version:
+  # 0.7.x — for torch 2.8 (>= 0.10 is built for newer torch). Used by the
+  # pyannote speaker-diarization stack (imported lazily; in-memory waveforms
+  # work without it).
+  torchcodec = mkWheel "torchcodec" "0.7.0" {
+    url = "https://files.pythonhosted.org/packages/01/25/177ea01d138598ab68d5e3b000789e8617bf97874bd8f761d89093f419ba/torchcodec-0.7.0-cp313-cp313-manylinux_2_28_x86_64.whl";
+    hash = "sha256-nHD5EPn0jmYlqsrtU092bhPUR7iV3HKZ6W1Nuak/FRQ=";
+  };
 }

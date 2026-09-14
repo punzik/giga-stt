@@ -45,6 +45,14 @@ let
     doCheck = false;
   };
 
+  # Speaker-diarization stack (pyannote/speaker-diarization-community-1).
+  # nixpkgs' pyannote-audio is overridden to use the same torch/torchaudio
+  # wheels as the rest of the package — otherwise the derivation would pull in
+  # a second, incompatible torch from nixpkgs.
+  pyannoteAudio = python3Packages.pyannote_audio.override {
+    inherit (wheels) torch torchaudio torchcodec;
+  };
+
   # The GigaAM-v3-e2e-rnnt checkpoint and tokenizer from the official Sber CDN.
   # The md5 check inside gigaam.load_model confirms download integrity.
   gigaamModel = runCommand "gigaam-v3_e2e_rnnt-model" { } ''
@@ -129,6 +137,7 @@ python3Packages.buildPythonApplication {
       wheels.transformers
       wheels.tokenizers
       wheels.safetensors
+      pyannoteAudio
     ];
 
   # Wrapper: ffmpeg in PATH (needed by gigaam.load_audio and ffprobe);

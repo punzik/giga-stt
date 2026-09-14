@@ -15,6 +15,7 @@ from transformers import AutoModelForCTC, AutoProcessor
 
 from .chunking import make_chunks
 from .config import Settings
+from .diarization import DiarizationBackend
 from .engine import (
     AudioDecodeError,
     AudioTooLongError,
@@ -72,7 +73,9 @@ class GraniteSpeechEngine:
         self.model.eval()
 
     @torch.inference_mode()
-    def transcribe_file(self, audio_path: str) -> TranscriptionOutput:
+    def transcribe_file(
+        self, audio_path: str, diarization: Optional[DiarizationBackend] = None
+    ) -> TranscriptionOutput:
         t0 = time.monotonic()
         duration = self._probe_duration(audio_path)
         if duration > self.settings.max_audio_sec:
@@ -95,12 +98,16 @@ class GraniteSpeechEngine:
             ]
 
         text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+        speakers = None
+        if diarization is not None and segments:
+            speakers = diarization.assign(wav, SAMPLE_RATE, segments)
         return TranscriptionOutput(
             text=text,
             duration=duration,
             segments=segments,
             vad_backend=vad_backend,
             inference_time=time.monotonic() - t0,
+            speakers=speakers,
         )
 
     def _decode(self, wav: torch.Tensor) -> str:

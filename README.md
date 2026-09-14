@@ -12,6 +12,8 @@ for English.
 * Up to 25 seconds — a single model pass; longer audio — automatic segmentation
   into chunks by voice activity and batched inference.
 * Select Russian (default) or English with the `language` parameter.
+* Optional speaker diarization ([pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)):
+  `with_speakers=true` adds the dominant speaker to each segment.
 * GPU acceleration (CUDA) or CPU; interactive Swagger UI docs at `/docs`.
 
 ---
@@ -28,6 +30,7 @@ for English.
   "device": "cuda",
   "torch": "2.8.0+cu128",
   "vad_backend": "silero",
+  "diarization": "ready",
   "ffmpeg": "/usr/bin/ffmpeg",
   "detail": null
 }
@@ -47,6 +50,7 @@ English speech only.
 | `file`            | file | —          | Audio                             |
 | `language`        | `ru` / `en` | `ru`       | Recognition language              |
 | `with_segments`   | bool | `true`     | Include the segment list          |
+| `with_speakers`   | bool | `false`    | Add the dominant speaker to segments (requires the diarization backend) |
 
 ### `POST /v1/transcribe-raw` (raw body)
 
@@ -64,7 +68,7 @@ same parameters but in the query string: `?language=en&with_segments=true`.
   "vad_backend": null,
   "processing_time": 0.61,
   "segments": [
-    {"text": "Hello! How are you?", "start": 0.0, "end": 2.73}
+    {"text": "Hello! How are you?", "start": 0.0, "end": 2.73, "speaker": "SPEAKER_00"}
   ]
 }
 ```
@@ -72,12 +76,13 @@ same parameters but in the query string: `?language=en&with_segments=true`.
 * `segments` — for long audio: segments `[start, end)` with text.
 * `vad_backend` — which segmentation backend was used
   (set only for audio longer than 25 s).
+* `segments[].speaker` — set when `with_speakers=true` (see below).
 
 ### Error codes
 
 | Code | Reason                                                       |
 |------|--------------------------------------------------------------|
-| 400  | Audio could not be decoded                                   |
+| 400  | Audio could not be decoded / `with_speakers` requested but diarization is disabled |
 | 401  | Invalid/missing API key (when `GIGAAM_API_KEY` is set)       |
 | 413  | File or duration exceeds the limits                          |
 | 422  | No `file` field                                              |
@@ -178,6 +183,11 @@ docker compose -f docker/docker-compose.yml logs -f giga-stt
 Both model weights are cached in the docker volume `giga-stt-models` (`/models` inside
 the container); after the first start the container comes up without downloading.
 
+Speaker diarization is built into the image by default
+(`INSTALL_DIARIZATION=1` build arg; `GIGAAM_DIARIZATION=pyannote` is set in the
+compose file) — it needs `HF_TOKEN` with accepted terms for the gated model;
+without the token the ASR service works and `diarization` in `/health` shows the error.
+
 CPU-only: comment out the `deploy` block in `docker/docker-compose.yml` and set
 `GIGAAM_DEVICE=cpu` (inference is noticeably slower).
 
@@ -202,7 +212,9 @@ CPU-only: comment out the `deploy` block in `docker/docker-compose.yml` and set
 | `GIGAAM_VAD_BACKEND`    | `auto`            | `auto` / `pyannote` / `silero` / `energy` |
 | `GIGAAM_API_KEY`        | —                 | If set — requests must send `X-API-Key: <key>` or `Bearer <key>` |
 | `GIGAAM_FFMPEG_PATH`    | —                 | Path to the ffmpeg binary (if not in PATH) |
-| `HF_TOKEN`              | —                 | HF token for the pyannote longform (gated model) |
+| `GIGAAM_DIARIZATION`    | `off`             | `off` / `pyannote` — speaker diarization backend (`with_speakers=true`) |
+| `GIGAAM_DIARIZATION_MODEL` | `pyannote/speaker-diarization-community-1` | Diarization pipeline (gated, CC-BY-4.0) |
+| `HF_TOKEN`              | —                 | HF token for the pyannote longform and the gated diarization model |
 
 ---
 
@@ -213,9 +225,8 @@ recordings into chunks and stitches the results together:
 
 1. **pyannote** (the official repository path) — VAD `pyannote/segmentation-3.0`.
    Requires the `pip install -e ".[longform]"` dependencies, an HF token, and
-   accepted terms for the gated model. ⚠ The extra upgrades torch to 2.10.x —
-   after installing, verify that CUDA is still available
-   (`python -c "import torch; print(torch.cuda.is_available())"`).
+   accepted terms for the gated model. The extra pins `pyannote.audio==4.0.*`,
+   which works with the pinned torch 2.8.0 (verified).
 2. **silero** — lightweight VAD [silero-vad](https://github.com/snakers4/silero-vad)
    (part of the base dependencies); the recommended option without gated access.
 3. **energy** — built-in fallback without external models: chunk boundaries are
@@ -223,6 +234,29 @@ recordings into chunks and stitches the results together:
 
 `auto` picks the first available backend. Cutting quality only affects phrase
 boundaries — pyannote/silero keep words intact by cutting at pauses.
+
+## Speaker diarization
+
+Optional: each transcribed segment gets the dominant speaker (`SPEAKER_00`, …).
+Powered by [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
+(gated model — a free HF account with accepted terms + `HF_TOKEN`; CC-BY-4.0, ~34 MB).
+
+```bash
+pip install -e ".[diarization]"   # pyannote.audio 4.0.x (+ torchcodec 0.7.x for torch 2.8)
+export GIGAAM_DIARIZATION=pyannote HF_TOKEN=hf_...
+```
+
+Then request `with_speakers=true` (multipart field or query parameter). The backend
+loads in the background like the ASR models — `/health` shows its status
+(`off` / `loading` / `ready` / `error: …`); until it is ready, `with_speakers=true`
+returns 503.
+
+* The pipeline runs once per request over the whole audio (~0.1× realtime on a
+  GTX 1660 SUPER: ~1–1.5 min per hour of audio, +33 MB VRAM).
+* Speaker labels are local to a single request — they are not stable across requests.
+* A speaker is assigned per ASR segment (the one with the largest overlap): words of
+  a second speaker inside one segment cannot be attributed (no word timestamps).
+* Works for both `language=ru` and `language=en`.
 
 ## Performance
 

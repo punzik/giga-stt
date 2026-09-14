@@ -28,6 +28,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 
 from . import __version__
 from .config import Settings
+from .diarization import DiarizationBackend
 from .engine import AudioDecodeError, AudioTooLongError
 from .schemas import HealthResponse, ServiceInfo, SegmentOut, TranscriptionResponse
 
@@ -39,6 +40,7 @@ logger = logging.getLogger("gigaam-stt")
 
 settings = Settings.from_env()
 engines: dict[str, object] = {}
+diarization_backend: DiarizationBackend | None = None
 
 AUDIO_CT_SUFFIX = {
     "audio/wav": ".wav",
@@ -69,7 +71,7 @@ def _build_engine() -> "SpeechEngine":
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from .granite_engine import GraniteSpeechEngine
 
-    global engines
+    global engines, diarization_backend
     engines = {
         "ru": _build_engine(),
         "en": GraniteSpeechEngine(settings),
@@ -77,6 +79,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     for language, engine in engines.items():
         engine.start_loading()
         logger.info("Service starting; %s model is loading in the background", language)
+    diarization_backend = DiarizationBackend(settings)
+    diarization_backend.start_loading()
+    if diarization_backend.enabled:
+        logger.info("Service starting; diarization is loading in the background")
     try:
         yield
     finally:
@@ -163,11 +169,35 @@ async def _upload_stream(upload: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-def _segment_out(seg) -> SegmentOut:
-    return SegmentOut(text=seg.text, start=round(seg.start, 3), end=round(seg.end, 3))
+def _ensure_diarization_ready() -> None:
+    """Reject with_speakers=true when the backend is off / loading / failed."""
+    backend = diarization_backend
+    if backend is None or backend.status() == "off":
+        raise HTTPException(
+            status_code=400,
+            detail="Speaker diarization is not enabled "
+            "(set GIGAAM_DIARIZATION=pyannote and install the .[diarization] dependencies)",
+        )
+    if backend.loading_error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Diarization backend failed to load: {backend.loading_error}",
+        )
+    if not backend.ready:
+        raise HTTPException(
+            status_code=503,
+            detail="Diarization model is still loading, please retry the request later",
+            headers={"Retry-After": "10"},
+        )
 
 
-async def _run_inference(tmp: Path, language: str, with_segments: bool) -> TranscriptionResponse:
+def _segment_out(seg, speaker: Optional[str] = None) -> SegmentOut:
+    return SegmentOut(text=seg.text, start=round(seg.start, 3), end=round(seg.end, 3), speaker=speaker)
+
+
+async def _run_inference(
+    tmp: Path, language: str, with_segments: bool, with_speakers: bool
+) -> TranscriptionResponse:
     """Queue the request for inference and run it in a worker."""
     loop = asyncio.get_running_loop()
     acquired = False
@@ -184,9 +214,10 @@ async def _run_inference(tmp: Path, language: str, with_segments: bool) -> Trans
             )
 
         t0 = time.monotonic()
+        diarization = diarization_backend if with_speakers else None
         try:
             result = await loop.run_in_executor(
-                executor, engines[language].transcribe_file, str(tmp)
+                executor, engines[language].transcribe_file, str(tmp), diarization
             )
         except AudioDecodeError as exc:
             raise HTTPException(status_code=400, detail=f"Failed to decode audio: {exc}")
@@ -204,7 +235,16 @@ async def _run_inference(tmp: Path, language: str, with_segments: bool) -> Trans
             model=(settings.model_name if language == "ru" else settings.granite_model_name),
             vad_backend=result.vad_backend,
             processing_time=round(inference, 3),
-            segments=[_segment_out(s) for s in result.segments] if with_segments else None,
+            segments=(
+                [
+                    _segment_out(
+                        s, result.speakers[i] if result.speakers is not None else None
+                    )
+                    for i, s in enumerate(result.segments)
+                ]
+                if with_segments
+                else None
+            ),
         )
     finally:
         if acquired:
@@ -228,12 +268,18 @@ async def health() -> HealthResponse:
         return HealthResponse(status="loading", version=__version__)
     failed = next((e for e in engines.values() if e.loading_error), None)
     status = "error" if failed else "ready" if all(e.ready for e in engines.values()) else "loading"
+    diarization_status: Optional[str] = None
+    if diarization_backend is not None:
+        diarization_status = diarization_backend.status()
+        if diarization_backend.loading_error:
+            diarization_status = f"error: {diarization_backend.loading_error}"
     return HealthResponse(
         status=status,
         model=f"ru: {settings.model_name}; en: {settings.granite_model_name}",
         device=str(engine.device) if engine.device is not None else None,
         torch=torch.__version__,
         vad_backend=engine.vad_backend,
+        diarization=diarization_status,
         ffmpeg=str(engine.ffmpeg_path) if engine.ffmpeg_path else None,
         detail=failed.loading_error if failed else None,
     )
@@ -250,11 +296,16 @@ async def transcribe(
     file: UploadFile = File(..., description="Audio (wav, mp3, ogg, m4a, flac, webm…)"),
     language: Literal["ru", "en"] = Form("ru", description="Recognition language"),
     with_segments: bool = Form(True, description="Return the segment list"),
+    with_speakers: bool = Form(
+        False, description="Add the dominant speaker to segments (requires the diarization backend)"
+    ),
 ) -> TranscriptionResponse:
     _ensure_engine_ready(language)
+    if with_speakers:
+        _ensure_diarization_ready()
     tmp = await _stream_to_tempfile(file.filename, _upload_stream(file))
     try:
-        return await _run_inference(tmp, language, with_segments)
+        return await _run_inference(tmp, language, with_segments, with_speakers)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -280,8 +331,13 @@ async def transcribe_raw(
     _: None = Depends(require_api_key),
     language: Literal["ru", "en"] = Query("ru", description="Recognition language"),
     with_segments: bool = Query(True, description="Return the segment list"),
+    with_speakers: bool = Query(
+        False, description="Add the dominant speaker to segments (requires the diarization backend)"
+    ),
 ) -> TranscriptionResponse:
     _ensure_engine_ready(language)
+    if with_speakers:
+        _ensure_diarization_ready()
     ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
     filename = (
         os.path.basename(request.headers.get("x-filename", ""))
@@ -289,6 +345,6 @@ async def transcribe_raw(
     )
     tmp = await _stream_to_tempfile(filename, request.stream())
     try:
-        return await _run_inference(tmp, language, with_segments)
+        return await _run_inference(tmp, language, with_segments, with_speakers)
     finally:
         tmp.unlink(missing_ok=True)

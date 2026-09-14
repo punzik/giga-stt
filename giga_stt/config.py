@@ -59,7 +59,13 @@ class Settings:
     api_key: str = ""
 
     # HF token for the official longform backend (pyannote/segmentation-3.0, gated)
+    # and for the gated diarization model
     hf_token: str = ""
+
+    # off | pyannote — speaker diarization backend (with_speakers=true requests)
+    diarization: str = "off"
+    # Gated pyannote diarization pipeline (accept the terms at hf.co, CC-BY-4.0)
+    diarization_model: str = "pyannote/speaker-diarization-community-1"
 
     @property
     def resolved_cache_dir(self) -> Path:
@@ -94,4 +100,6 @@ class Settings:
         s.vad_backend = _env("GIGAAM_VAD_BACKEND", s.vad_backend).lower()
         s.api_key = _env("GIGAAM_API_KEY", s.api_key)
         s.hf_token = _env("HF_TOKEN", s.hf_token)
+        s.diarization = _env("GIGAAM_DIARIZATION", s.diarization).lower()
+        s.diarization_model = _env("GIGAAM_DIARIZATION_MODEL", s.diarization_model)
         return s

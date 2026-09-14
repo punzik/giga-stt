@@ -13,6 +13,9 @@ class SegmentOut(BaseModel):
     text: str
     start: float = Field(..., description="Segment start, seconds (0 for short audio)")
     end: float = Field(..., description="Segment end, seconds")
+    speaker: Optional[str] = Field(
+        None, description="Dominant speaker (set when with_speakers=true)"
+    )
 
 
 class TranscriptionResponse(BaseModel):
@@ -36,6 +39,9 @@ class HealthResponse(BaseModel):
     device: Optional[str] = None
     torch: Optional[str] = None
     vad_backend: Optional[str] = None
+    diarization: Optional[str] = Field(
+        None, description="Diarization backend status: off | loading | ready | error: …"
+    )
     ffmpeg: Optional[str] = None
     detail: Optional[str] = Field(None, description="Loading error message, if any")
 
