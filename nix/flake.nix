@@ -41,7 +41,9 @@
         giga-stt = final.callPackage ./package.nix { };
       };
 
-      nixosModules.giga-stt = import ./module.nix;
+      # The module lives in nix/default.nix, so `imports = [ <path>/nix ]`
+      # (directory) plugs the service module straight into a NixOS config.
+      nixosModules.giga-stt = ./default.nix;
       nixosModules.default = self.nixosModules.giga-stt;
     };
 }

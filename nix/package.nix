@@ -49,7 +49,7 @@ let
   # nixpkgs' pyannote-audio is overridden to use the same torch/torchaudio
   # wheels as the rest of the package — otherwise the derivation would pull in
   # a second, incompatible torch from nixpkgs.
-  pyannoteAudio = python3Packages.pyannote_audio.override {
+  pyannoteAudio = python3Packages.pyannote-audio.override {
     inherit (wheels) torch torchaudio torchcodec;
   };
 

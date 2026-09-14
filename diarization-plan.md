@@ -63,7 +63,7 @@
 7. **`docker/`** — build-arg `INSTALL_DIARIZATION` (pip extra), env `GIGAAM_DIARIZATION`,
    `PYANNOTE_METRICS_ENABLED=0`.
 8. **`nix/package.nix`** — `python3Packages.pyannote_audio` в propagatedBuildInputs;
-   **`nix/module.nix`** — env-переменные сервиса.
+   **`nix/default.nix`** (модуль NixOS, подключается каталогом) — env-переменные сервиса.
 9. **`README.md`** — раздел «Speaker diarization»: включение, API, цены, Nix/Docker.
 10. **Смоук-тест** — venv в /tmp (torch 2.8 + extra + `pip install -e .`), запуск сервиса,
     curl с `with_speakers=true`, проверка speaker'ов в segments.
