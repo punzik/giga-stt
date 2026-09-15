@@ -165,6 +165,12 @@ Docker is the recommended way to run giga-stt. All examples use
 (the underlying `docker` commands are shown where they differ). The compose file
 drives the GPU via CDI but can run on CPU (see [CPU-only](#cpu-only)).
 
+The image is built **from the remote git repository**
+`https://git.embddr.xyz/np/giga-stt.git` (git build context), not from the local
+working copy — so the sources must be pushed to that repo before an update is
+picked up. The build is pinned to a ref with the `#ref` suffix in the compose file
+(currently `#main`).
+
 ### Prerequisites
 
 - Docker (≥ 24 with CDI support) and the `docker compose` plugin.
@@ -183,13 +189,16 @@ alias dc='docker compose -f docker/docker-compose.yml'
 ### First run (from scratch)
 
 ```bash
-# 1. build the image (installs the torch 2.8 CUDA wheels, giga-stt and the
-#    pyannote diarization dependencies)
+# 1. build the image — pulls the sources from the remote git repo, installs the
+#    torch 2.8 CUDA wheels, giga-stt and the pyannote diarization dependencies
 cd giga-stt && dc build
 
 # 2. start the service in the background
 cd giga-stt && dc up -d
 ```
+
+> The remote repo must be pushed up to date — the build reads the code from
+git, not from the local checkout.
 
 First start downloads the model and loads it, which takes a minute or two. Watch it
 turn ready:
@@ -253,13 +262,17 @@ change.
 
 ### Update to a new version
 
-Pull the updated sources, rebuild the image and recreate the container:
+Push the new code to the remote repo, then rebuild and recreate the container:
 
 ```bash
-git pull                       # or copy the new files over the checkout
-cd giga-stt && dc build        # rebuild the image from the new code
+cd giga-stt && dc build        # fetches the latest source from the remote git repo
 cd giga-stt && dc up -d        # recreate the container with the new image
 ```
+
+No local `git pull` is needed for the build — the source comes from the remote git
+targeted by the compose `context:`. To pin a specific version instead of `#main`,
+set the `#ref` suffix in `docker/docker-compose.yml` to a commit hash or a tag
+(for example `.git#v1.2.0`).
 
 `dc up -d` keeps the `giga-stt-models` volume, so the cached model survives updates.
 

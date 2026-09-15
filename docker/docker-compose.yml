@@ -1,8 +1,11 @@
 services:
   giga-stt:
     build:
-      # Build from the repository root (the Dockerfile copies pyproject/../giga_stt).
-      context: ..
+      # Build from the remote git repository (not from the local working copy).
+      # The remote must be pushed to current; pin a branch / commit / tag with the
+      # `#ref` suffix, e.g. https://git.embddr.xyz/np/giga-stt.git#main
+      context: https://git.embddr.xyz/np/giga-stt.git#main
+      # Path is relative to the cloned repo root.
       dockerfile: docker/Dockerfile
       args:
         # 1 = install the pyannote speaker-diarization dependencies
