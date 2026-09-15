@@ -158,36 +158,163 @@ curl -s -X POST http://localhost:8000/v1/transcribe -F "file=@voice.wav"
 wget -O example.wav "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/example.wav"
 ```
 
-## Running in Docker (GPU)
+## Running with Docker
 
-Requires the NVIDIA driver and nvidia-container-toolkit on the host, with Docker's
-CDI support enabled (`features.cdi=true`, e.g. NixOS `hardware.nvidia-container-toolkit.enable`).
-The compose file passes the GPU to the container via CDI (`nvidia.com/gpu=all` —
-the equivalent of `docker run --device nvidia.com/gpu=all`).
+Docker is the recommended way to run giga-stt. All examples use
+`docker compose -f docker/docker-compose.yml`, abbreviated as `dc` in this doc
+(the underlying `docker` commands are shown where they differ). The compose file
+drives the GPU via CDI but can run on CPU (see [CPU-only](#cpu-only)).
+
+### Prerequisites
+
+- Docker (≥ 24 with CDI support) and the `docker compose` plugin.
+- NVIDIA driver + **nvidia-container-toolkit** on the host, with Docker CDI enabled
+  (`features.cdi=true`). On NixOS that is `hardware.nvidia-container-toolkit.enable`;
+  the compose file passes the GPU to the container via `--device nvidia.com/gpu=all`.
+- Internet on the very first start (the ~450 MB GigaAM checkpoint is downloaded once).
+- Optional: an `HF_TOKEN` for speaker diarization (see [Speaker diarization](#speaker-diarization)).
+
+For the commands below, set:
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d --build
-# model loading logs
-docker compose -f docker/docker-compose.yml logs -f giga-stt
+alias dc='docker compose -f docker/docker-compose.yml'
+```
+
+### First run (from scratch)
+
+```bash
+# 1. build the image (installs the torch 2.8 CUDA wheels, giga-stt and the
+#    pyannote diarization dependencies)
+cd giga-stt && dc build
+
+# 2. start the service in the background
+cd giga-stt && dc up -d
+```
+
+First start downloads the model and loads it, which takes a minute or two. Watch it
+turn ready:
+
+```bash
+dc logs -f giga-stt          # follow the logs; exits with Ctrl-C
+# you are ready when you see:
+#   INFO giga_stt.engine: Model v3_e2e_rnnt ready (cuda)
+```
+
+Or poll the health endpoint until the GPU device appears:
+
+```bash
+until curl -fsS http://localhost:8000/health | grep -q '"device":"cuda"'; do sleep 3; done
+curl -s http://localhost:8000/health
 ```
 
 The model weights are cached in the docker volume `giga-stt-models` (`/models` inside
-the container); after the first start the container comes up without downloading.
-
-Speaker diarization is built into the image by default
-(`INSTALL_DIARIZATION=1` build arg; `GIGAAM_DIARIZATION=pyannote` is set in the
-compose file) — it needs `HF_TOKEN` with accepted terms for the gated model;
-without the token the ASR service works and `diarization` in `/health` shows the error.
-
-Direct run without compose:
+the container), so on subsequent starts the container comes up without re-downloading.
+Verify transcription with the official sample:
 
 ```bash
-docker run --rm --device nvidia.com/gpu=all -p 8000:8000 \
-  -e GIGAAM_DEVICE=cuda docker-giga-stt
+wget -O example.wav "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/example.wav"
+curl -s -X POST http://localhost:8000/v1/transcribe -F file=@example.wav
 ```
 
-CPU-only: comment out the `devices` block in `docker/docker-compose.yml` and set
-`GIGAAM_DEVICE=cpu` (inference is noticeably slower).
+### Check status and logs
+
+```bash
+dc ps                          # container state
+curl -s http://localhost:8000/health
+
+dc logs --tail 50 giga-stt     # last 50 lines
+# interactive API docs: http://localhost:8000/docs
+```
+
+### Update to a new version
+
+Pull the updated sources, rebuild the image and recreate the container:
+
+```bash
+git pull                       # or copy the new files over the checkout
+cd giga-stt && dc build        # rebuild the image from the new code
+cd giga-stt && dc up -d        # recreate the container with the new image
+```
+
+`dc up -d` keeps the `giga-stt-models` volume, so the cached model survives updates.
+
+### Stop / start / restart
+
+```bash
+dc stop        # stop the container (keeps it and the model volume)
+dc start       # start it again (no rebuild, no re-download)
+dc restart     # stop + start in one step
+
+# or directly by the container name:
+docker stop giga-stt && docker start giga-stt
+```
+
+If a container from an older image is still running, `dc up -d` recreates it — you
+don't need to stop it by hand first.
+
+### Remove
+
+```bash
+# stop and remove the container (keeps the `giga-stt-models` volume, so re-`up` is fast)
+dc down
+
+# also delete the model cache volume — the next start downloads the model again
+# (e.g. on error, or to free disk space)
+dc down -v
+
+# delete the built images
+cd giga-stt && docker rmi docker-giga-stt giga-stt:base
+# exact image names/tags:  docker images | grep giga
+```
+
+### CPU-only
+
+Comment out the `devices` block in `docker/docker-compose.yml` and set
+`GIGAAM_DEVICE: cpu` in `environment:`:
+
+```yaml
+    devices:
+      - nvidia.com/gpu=all   # <- comment out this block for CPU run
+    environment:
+      GIGAAM_DEVICE: cpu
+```
+
+Then recreate the container:
+
+```bash
+cd giga-stt && dc up -d --build
+```
+
+Inference on CPU is noticeably slower than on CUDA.
+
+### Direct run without compose
+
+```bash
+# GPU
+cd giga-stt && docker run -d --name giga-stt --device nvidia.com/gpu=all \
+  -p 8000:8000 -v giga-stt-models:/models -e GIGAAM_DEVICE=cuda docker-giga-stt
+
+# CPU
+cd giga-stt && docker run -d --name giga-stt -p 8000:8000 \
+  -v giga-stt-models:/models -e GIGAAM_DEVICE=cpu docker-giga-stt
+```
+
+### Speaker diarization
+
+Diarization is built into the image by default (`INSTALL_DIARIZATION=1` build arg;
+`GIGAAM_DIARIZATION: pyannote` is set in the compose file). To use it, provide an
+`HF_TOKEN` that has accepted the terms for the gated model
+`pyannote/speaker-diarization-community-1` (free, CC-BY-4.0) — add it under
+`environment:` in `docker/docker-compose.yml`:
+
+```yaml
+    environment:
+      HF_TOKEN: hf_xxxxxxxx
+```
+
+Without the token the ASR service still works; `diarization` in `/health` then shows
+a 401 error instead of `ready`. With it, requests may set `with_speakers=true` to get
+the per-segment `speaker` field.
 
 ---
 

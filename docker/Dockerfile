@@ -2,7 +2,6 @@
 FROM python:3.13-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
     GIGAAM_MODEL=v3_e2e_rnnt \
     GIGAAM_CACHE_DIR=/models/gigaam \
     PYANNOTE_METRICS_ENABLED=0
@@ -16,14 +15,23 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# Heavy, pinned, independent layer: the torch CUDA wheels. It is rebuilt only when
+# the torch/torchaudio version changes — never when app code changes. The pip cache
+# mount keeps the wheels on disk across BuildKit builds, so re-running this layer is
+# cheap and does not re-download the wheels from the network.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install torch==2.8.0 torchaudio==2.8.0
+
+# Metadata first, source copied only after the heavy install, so editing the app code
+# invalidates only the final install layer (dependencies come from the pip cache).
 COPY pyproject.toml README.md ./
 COPY giga_stt ./giga_stt
+
 # With INSTALL_DIARIZATION=1 the image also gets the pyannote speaker-diarization
 # dependencies (.[diarization]) — ~150 MB extra; enable GIGAAM_DIARIZATION to use it.
 ARG INSTALL_DIARIZATION=0
-# torch 2.8.0 separately — stabilizes the cache layer; the rest comes in via pip install .
-RUN pip install torch==2.8.0 torchaudio==2.8.0 \
-    && if [ "$INSTALL_DIARIZATION" = "1" ]; then pip install .[diarization]; else pip install .; fi
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ "$INSTALL_DIARIZATION" = "1" ]; then pip install .[diarization]; else pip install .; fi
 
 # The GigaAM model is downloaded into the /models volume on first start.
 # To make a self-contained image, uncomment the next layer
