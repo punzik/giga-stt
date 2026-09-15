@@ -2,7 +2,7 @@
 
 Enabled with ``GIGAAM_DIARIZATION=pyannote`` + the ``.[diarization]`` dependencies
 and an HF token with accepted terms for the gated model. The pipeline loads in a
-background thread (like the ASR engines) and is shared by both language backends.
+background thread alongside the ASR engine.
 
 For every transcribed segment ``[start, end)`` the speaker with the largest
 overlap in the *exclusive* diarization annotation (no overlapped speech) is

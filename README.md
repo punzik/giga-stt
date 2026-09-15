@@ -1,9 +1,7 @@
 # giga-stt
 
-HTTP speech-to-text service with two recognition backends:
-[GigaAM-v3-e2e-rnnt](https://huggingface.co/ai-sage/GigaAM-v3) for Russian
-and [IBM Granite Speech TurboCTC](https://huggingface.co/ibm-granite/granite-speech-5.0-470m-turboctc)
-for English.
+HTTP speech-to-text service based on the Russian
+[GigaAM-v3-e2e-rnnt](https://huggingface.co/ai-sage/GigaAM-v3) model.
 
 * Request format: **multipart/form-data** (`POST /v1/transcribe`) or a raw byte
   stream (`POST /v1/transcribe-raw`).
@@ -11,7 +9,6 @@ for English.
   (wav, mp3, ogg/opus, m4a, flac, webm, amr…), mono/stereo.
 * Up to 25 seconds — a single model pass; longer audio — automatic segmentation
   into chunks by voice activity and batched inference.
-* Select Russian (default) or English with the `language` parameter.
 * Optional speaker diarization ([pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)):
   `with_speakers=true` adds the dominant speaker to each segment.
 * GPU acceleration (CUDA) or CPU; interactive Swagger UI docs at `/docs`.
@@ -26,7 +23,7 @@ for English.
 {
   "status": "ready",
   "version": "1.0.0",
-  "model": "ru: v3_e2e_rnnt; en: ibm-granite/granite-speech-5.0-470m-turboctc",
+  "model": "v3_e2e_rnnt",
   "device": "cuda",
   "torch": "2.8.0+cu128",
   "vad_backend": "silero",
@@ -36,39 +33,37 @@ for English.
 }
 ```
 
-The Russian and English models load in the background. Statuses: `loading` — a model is
-being downloaded/loaded; `ready` — you can send requests for both languages; `error` — a
-model failed to load (the reason is in `detail`).
+The model loads in the background. Statuses: `loading` — the model is being
+downloaded/loaded; `ready` — you can send requests; `error` — the model failed to load
+(the reason is in `detail`).
 
-`language=ru` uses GigaAM with Russian speech; `language=en` uses IBM Granite and accepts
-English speech only.
+The service recognizes Russian speech.
 
 ### `POST /v1/transcribe` (multipart/form-data)
 
 | Field             | Type | Default    | Description                       |
 |-------------------|------|------------|-----------------------------------|
 | `file`            | file | —          | Audio                             |
-| `language`        | `ru` / `en` | `ru`       | Recognition language              |
 | `with_segments`   | bool | `true`     | Include the segment list          |
 | `with_speakers`   | bool | `false`    | Add the dominant speaker to segments (requires the diarization backend) |
 
 ### `POST /v1/transcribe-raw` (raw body)
 
 The request body is the raw audio bytes, `Content-Type: audio/wav|audio/mpeg|audio/ogg|…`,
-same parameters but in the query string: `?language=en&with_segments=true`.
+same parameters but in the query string: `?with_segments=true`.
 
 ### Response
 
 ```json
 {
-  "text": "Hello! How are you?",
+  "text": "Привет! Как дела?",
   "duration": 2.73,
   "language": "ru",
   "model": "v3_e2e_rnnt",
   "vad_backend": null,
   "processing_time": 0.61,
   "segments": [
-    {"text": "Hello! How are you?", "start": 0.0, "end": 2.73, "speaker": "SPEAKER_00"}
+    {"text": "Привет! Как дела?", "start": 0.0, "end": 2.73, "speaker": "SPEAKER_00"}
   ]
 }
 ```
@@ -100,10 +95,6 @@ same parameters but in the query string: `?language=en&with_segments=true`.
 curl -s -X POST http://localhost:8000/v1/transcribe \
   -F "file=@voice.wav" | jq -r .text
 
-# English transcription
-curl -s -X POST http://localhost:8000/v1/transcribe \
-  -F "file=@voice.mp3" -F "language=en" | jq
-
 # raw stream
 curl -s -X POST http://localhost:8000/v1/transcribe-raw \
   -H "Content-Type: audio/ogg" --data-binary @recording.ogg | jq -r .text
@@ -117,7 +108,6 @@ import requests
 r = requests.post(
     "http://localhost:8000/v1/transcribe",
     files={"file": open("voice.wav", "rb")},
-    data={"language": "en"},
     timeout=600,
 )
 r.raise_for_status()
@@ -137,7 +127,6 @@ with open("call_center.ogg", "rb") as f:
         "http://localhost:8000/v1/transcribe-raw",
         content=f,
         headers={"Content-Type": "audio/ogg"},
-        params={"language": "en"},
         timeout=1800,
     )
 print(r.json()["text"])
@@ -180,7 +169,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 docker compose -f docker/docker-compose.yml logs -f giga-stt
 ```
 
-Both model weights are cached in the docker volume `giga-stt-models` (`/models` inside
+The model weights are cached in the docker volume `giga-stt-models` (`/models` inside
 the container); after the first start the container comes up without downloading.
 
 Speaker diarization is built into the image by default
@@ -200,9 +189,7 @@ CPU-only: comment out the `deploy` block in `docker/docker-compose.yml` and set
 | `GIGAAM_MODEL`          | `v3_e2e_rnnt`     | Any GigaAM model: `v3_rnnt`, `v3_ctc`, `v3_e2e_ctc`, … |
 | `GIGAAM_DEVICE`         | `auto`            | `auto` / `cuda` / `cpu` |
 | `GIGAAM_FP16_ENCODER`   | `false`           | fp16 encoder + autocast. ⚠ On GTX 16xx GPUs (TU116/TU117, no tensor cores) cuDNN fp16 convolutions on long inputs (T ≳ 550 frames) produce NaN — do not enable there; on RTX/A100/H100 enabling it speeds up inference |
-| `GIGAAM_CACHE_DIR`      | `~/.cache/gigaam` | Russian GigaAM weights directory |
-| `GRANITE_MODEL`         | `ibm-granite/granite-speech-5.0-470m-turboctc` | English model |
-| `GRANITE_CACHE_DIR`     | `~/.cache/huggingface` | English model cache directory |
+| `GIGAAM_CACHE_DIR`      | `~/.cache/gigaam` | GigaAM weights directory |
 | `GIGAAM_MAX_UPLOAD_MB`  | `100`             | Maximum upload size |
 | `GIGAAM_MAX_AUDIO_SEC`  | `7200`            | Safety cap on duration |
 | `GIGAAM_MAX_CONCURRENCY`| `1`               | Concurrent inferences (the rest wait in the queue) |
@@ -256,7 +243,7 @@ returns 503.
 * Speaker labels are local to a single request — they are not stable across requests.
 * A speaker is assigned per ASR segment (the one with the largest overlap): words of
   a second speaker inside one segment cannot be attributed (no word timestamps).
-* Works for both `language=ru` and `language=en`.
+* Works with Russian speech.
 
 ## Performance
 

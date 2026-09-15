@@ -22,14 +22,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator, Literal, Optional
+from typing import AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 
 from . import __version__
 from .config import Settings
 from .diarization import DiarizationBackend
-from .engine import AudioDecodeError, AudioTooLongError
+from .engine import AudioDecodeError, AudioTooLongError, SpeechEngine
 from .schemas import HealthResponse, ServiceInfo, SegmentOut, TranscriptionResponse
 
 logging.basicConfig(
@@ -39,7 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger("gigaam-stt")
 
 settings = Settings.from_env()
-engines: dict[str, object] = {}
+engine: SpeechEngine | None = None
 diarization_backend: DiarizationBackend | None = None
 
 AUDIO_CT_SUFFIX = {
@@ -61,24 +61,12 @@ AUDIO_CT_SUFFIX = {
 }
 
 
-def _build_engine() -> "SpeechEngine":
-    from .engine import SpeechEngine
-
-    return SpeechEngine(settings)
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    from .granite_engine import GraniteSpeechEngine
-
-    global engines, diarization_backend
-    engines = {
-        "ru": _build_engine(),
-        "en": GraniteSpeechEngine(settings),
-    }
-    for language, engine in engines.items():
-        engine.start_loading()
-        logger.info("Service starting; %s model is loading in the background", language)
+    global engine, diarization_backend
+    engine = SpeechEngine(settings)
+    engine.start_loading()
+    logger.info("Service starting; model is loading in the background")
     diarization_backend = DiarizationBackend(settings)
     diarization_backend.start_loading()
     if diarization_backend.enabled:
@@ -92,8 +80,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="GigaAM Speech-to-Text",
     description=(
-        "Speech-to-text REST service. Use language=ru (default) for GigaAM or "
-        "language=en for IBM Granite Speech TurboCTC. Audio up to 25 s is "
+        "Russian speech-to-text REST service powered by GigaAM. Audio up to 25 s is "
         "transcribed in a single pass; longer audio is segmented by voice activity."
     ),
     version=__version__,
@@ -120,12 +107,11 @@ def require_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="A valid API key is required (X-API-Key)")
 
 
-def _ensure_engine_ready(language: str) -> object:
-    engine = engines.get(language)
+def _ensure_engine_ready() -> SpeechEngine:
     if engine is None:  # pragma: no cover — requests before lifespan are not served
         raise HTTPException(status_code=503, detail="Service is still initializing")
     if engine.loading_error:
-        raise HTTPException(status_code=500, detail=f"{language} model failed to load: {engine.loading_error}")
+        raise HTTPException(status_code=500, detail=f"Model failed to load: {engine.loading_error}")
     if not engine.ready:
         raise HTTPException(
             status_code=503,
@@ -196,7 +182,7 @@ def _segment_out(seg, speaker: Optional[str] = None) -> SegmentOut:
 
 
 async def _run_inference(
-    tmp: Path, language: str, with_segments: bool, with_speakers: bool
+    tmp: Path, with_segments: bool, with_speakers: bool
 ) -> TranscriptionResponse:
     """Queue the request for inference and run it in a worker."""
     loop = asyncio.get_running_loop()
@@ -217,7 +203,7 @@ async def _run_inference(
         diarization = diarization_backend if with_speakers else None
         try:
             result = await loop.run_in_executor(
-                executor, engines[language].transcribe_file, str(tmp), diarization
+                executor, engine.transcribe_file, str(tmp), diarization
             )
         except AudioDecodeError as exc:
             raise HTTPException(status_code=400, detail=f"Failed to decode audio: {exc}")
@@ -231,8 +217,8 @@ async def _run_inference(
         return TranscriptionResponse(
             text=result.text,
             duration=round(result.duration, 3),
-            language=language,
-            model=(settings.model_name if language == "ru" else settings.granite_model_name),
+            language="ru",
+            model=settings.model_name,
             vad_backend=result.vad_backend,
             processing_time=round(inference, 3),
             segments=(
@@ -256,18 +242,17 @@ async def _run_inference(
 
 @app.get("/", response_model=ServiceInfo)
 async def root() -> ServiceInfo:
-    return ServiceInfo(model=f"ru: {settings.model_name}; en: {settings.granite_model_name}")
+    return ServiceInfo(model=settings.model_name)
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     import torch
 
-    engine = engines.get("ru")
     if engine is None:
         return HealthResponse(status="loading", version=__version__)
-    failed = next((e for e in engines.values() if e.loading_error), None)
-    status = "error" if failed else "ready" if all(e.ready for e in engines.values()) else "loading"
+    failed = engine if engine.loading_error else None
+    status = "error" if failed else "ready" if engine.ready else "loading"
     diarization_status: Optional[str] = None
     if diarization_backend is not None:
         diarization_status = diarization_backend.status()
@@ -275,7 +260,7 @@ async def health() -> HealthResponse:
             diarization_status = f"error: {diarization_backend.loading_error}"
     return HealthResponse(
         status=status,
-        model=f"ru: {settings.model_name}; en: {settings.granite_model_name}",
+        model=settings.model_name,
         device=str(engine.device) if engine.device is not None else None,
         torch=torch.__version__,
         vad_backend=engine.vad_backend,
@@ -294,18 +279,17 @@ async def health() -> HealthResponse:
 async def transcribe(
     _: None = Depends(require_api_key),
     file: UploadFile = File(..., description="Audio (wav, mp3, ogg, m4a, flac, webm…)"),
-    language: Literal["ru", "en"] = Form("ru", description="Recognition language"),
     with_segments: bool = Form(True, description="Return the segment list"),
     with_speakers: bool = Form(
         False, description="Add the dominant speaker to segments (requires the diarization backend)"
     ),
 ) -> TranscriptionResponse:
-    _ensure_engine_ready(language)
+    _ensure_engine_ready()
     if with_speakers:
         _ensure_diarization_ready()
     tmp = await _stream_to_tempfile(file.filename, _upload_stream(file))
     try:
-        return await _run_inference(tmp, language, with_segments, with_speakers)
+        return await _run_inference(tmp, with_segments, with_speakers)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -329,13 +313,12 @@ async def transcribe(
 async def transcribe_raw(
     request: Request,
     _: None = Depends(require_api_key),
-    language: Literal["ru", "en"] = Query("ru", description="Recognition language"),
     with_segments: bool = Query(True, description="Return the segment list"),
     with_speakers: bool = Query(
         False, description="Add the dominant speaker to segments (requires the diarization backend)"
     ),
 ) -> TranscriptionResponse:
-    _ensure_engine_ready(language)
+    _ensure_engine_ready()
     if with_speakers:
         _ensure_diarization_ready()
     ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -345,6 +328,6 @@ async def transcribe_raw(
     )
     tmp = await _stream_to_tempfile(filename, request.stream())
     try:
-        return await _run_inference(tmp, language, with_segments, with_speakers)
+        return await _run_inference(tmp, with_segments, with_speakers)
     finally:
         tmp.unlink(missing_ok=True)

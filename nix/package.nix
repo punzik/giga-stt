@@ -105,7 +105,7 @@ python3Packages.buildPythonApplication {
       networkx
       jinja2
       fsspec
-      # Runtime dependencies of the Transformers wheel.
+      # Runtime dependencies of the Python packages above.
       huggingface-hub
       packaging
       pyyaml
@@ -134,9 +134,6 @@ python3Packages.buildPythonApplication {
       wheels.nvidia_nvtx_cu12
       wheels.triton
       wheels.silero_vad
-      wheels.transformers
-      wheels.tokenizers
-      wheels.safetensors
       pyannoteAudio
     ];
 
@@ -152,7 +149,7 @@ python3Packages.buildPythonApplication {
   passthru = {
     inherit gigaamModel;
     meta = {
-      description = "Russian and English REST speech-to-text service (GigaAM and IBM Granite)";
+      description = "Russian speech-to-text REST service based on GigaAM";
       license = lib.licenses.mit;
       platforms = [ "x86_64-linux" ];
     };

@@ -16,7 +16,6 @@
 |---|---|
 | 11.3 с, ru, 1 спикер, `with_speakers=true` | 200, `SPEAKER_00` |
 | 65 с, ru, 2 спикера (чанки silero) | 200, `01, 01, 01, 00` — совпадает с прямым проходом пайплайна |
-| en (Granite) + `with_speakers=true` | 200, `SPEAKER_00` |
 | без `with_speakers` | `speaker: null`, без накладных расходов |
 | raw-endpoint + `with_speakers=true` | 200 |
 | `GIGAAM_DIARIZATION=off` + `with_speakers=true` | 400 с detail |
@@ -25,8 +24,7 @@
 
 
 Цель: опциональная диаризация поверх существующего STT. Запрос с `with_speakers=true`
-добавляет поле `speaker` к каждому сегменту транскрипции. Работает и для `ru` (GigaAM),
-и для `en` (Granite).
+добавляет поле `speaker` к каждому сегменту транскрипции.
 
 ## Проверено e2e на этой машине (GTX 1660 SUPER, torch 2.8.0+cu128)
 
@@ -54,9 +52,8 @@
 3. **`giga_stt/config.py`** — env: `GIGAAM_DIARIZATION=off|pyannote` (default `off`),
    `GIGAAM_DIARIZATION_MODEL` (default `pyannote/speaker-diarization-community-1`).
 4. **`giga_stt/schemas.py`** — `SegmentOut.speaker: Optional[str] = None`.
-5. **`giga_stt/engine.py` + `giga_stt/granite_engine.py`** — параметр `with_speakers`:
-   после получения сегментов выполнить диаризацию по полному wav (16 kHz mono уже
-   загружен в обеих ветках) и приписать `speaker` к сегментам.
+5. **`giga_stt/engine.py`** — после получения сегментов выполнить диаризацию по
+   полному wav (16 kHz mono) и приписать `speaker` к сегментам.
 6. **`giga_stt/app.py`** — query/form-параметр `with_speakers` (default false) на обоих
    endpoints; 400 если backend выключен, 503 если грузится/ошибка; `/health` — поле
    `diarization`; запуск `start_loading()` при старте.

@@ -1,5 +1,5 @@
 {
-  description = "giga-stt: Russian and English REST speech-to-text service";
+  description = "giga-stt: Russian REST speech-to-text service";
 
   inputs = {
     # The nixpkgs revision matches the system channel (NixOS 26.05) —

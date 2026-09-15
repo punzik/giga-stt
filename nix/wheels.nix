@@ -92,20 +92,6 @@ in
     url = "https://files.pythonhosted.org/packages/0b/2b/48566f29a8b53d856ceb1994f209122749b3fda0a733a07e82047257de7a/silero_vad-6.2.1-py3-none-any.whl";
     hash = "sha256-Cd6TxNh0uxnFPmKkfdOL5fFjztrStVmVgyMfKoTvecs=";
   };
-  # Granite Speech TurboCTC requires transformers >=5.16.  The pinned nixpkgs
-  # versions of transformers, tokenizers, and safetensors are too old.
-  transformers = mkWheel "transformers" "5.16.0" {
-    url = "https://files.pythonhosted.org/packages/a9/6b/b606c1a5d6a8aa6436bea8bfbbc0fce146859430db684debb5f740c216d3/transformers-5.16.0-py3-none-any.whl";
-    hash = "sha256-K0rdqNmbtMGyCNpe2WfiYlrUSQh4J6dQyzsjzkAAsTk=";
-  };
-  tokenizers = mkWheel "tokenizers" "0.23.1" {
-    url = "https://files.pythonhosted.org/packages/0d/d5/1353e5f677ec27c2494fb6a6725e82d56c985f53e90ec511369e7e4f02c6/tokenizers-0.23.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl";
-    hash = "sha256-UHW0BQBkFeoUipktCTaZxm6wGVK/WfTVcnCJqYvaRaQ=";
-  };
-  safetensors = mkWheel "safetensors" "0.8.0" {
-    url = "https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl";
-    hash = "sha256-/W8/k8mgp8wniO5j+3YzU9S9LomwdRvHj8992gC+p3Q=";
-  };
   # The C extension of torchcodec is paired with a specific torch version:
   # 0.7.x — for torch 2.8 (>= 0.10 is built for newer torch). Used by the
   # pyannote speaker-diarization stack (imported lazily; in-memory waveforms

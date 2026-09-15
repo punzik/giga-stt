@@ -11,8 +11,6 @@ services:
     environment:
       # Model: v3_e2e_rnnt (default), v3_rnnt, v3_ctc, v3_e2e_ctc…
       GIGAAM_MODEL: v3_e2e_rnnt
-      # English model used for language=en requests.
-      GRANITE_MODEL: ibm-granite/granite-speech-5.0-470m-turboctc
       # auto | cuda | cpu
       GIGAAM_DEVICE: auto
       # HF token — required for diarization and the official longform VAD.

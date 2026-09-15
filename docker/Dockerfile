@@ -5,7 +5,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     GIGAAM_MODEL=v3_e2e_rnnt \
     GIGAAM_CACHE_DIR=/models/gigaam \
-    GRANITE_CACHE_DIR=/models/huggingface \
     PYANNOTE_METRICS_ENABLED=0
 
 # ffmpeg is needed by gigaam.load_audio (decoding any format),
@@ -26,7 +25,7 @@ ARG INSTALL_DIARIZATION=0
 RUN pip install torch==2.8.0 torchaudio==2.8.0 \
     && if [ "$INSTALL_DIARIZATION" = "1" ]; then pip install .[diarization]; else pip install .; fi
 
-# Both language models are downloaded into the /models volume on first start.
+# The GigaAM model is downloaded into the /models volume on first start.
 # To make a self-contained image, uncomment the next layer
 # (the build takes longer, but the container works offline):
 # RUN python -c "import gigaam; gigaam.load_model('v3_e2e_rnnt', device='cpu')"

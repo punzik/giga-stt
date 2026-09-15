@@ -27,12 +27,6 @@ in
       description = "Russian GigaAM model name";
     };
 
-    graniteModel = lib.mkOption {
-      type = lib.types.str;
-      default = "ibm-granite/granite-speech-5.0-470m-turboctc";
-      description = "English IBM Granite Speech TurboCTC model name";
-    };
-
     device = lib.mkOption {
       type = lib.types.str;
       default = "auto";
@@ -108,7 +102,7 @@ in
     ];
 
     systemd.services.giga-stt = {
-      description = "GigaAM and IBM Granite speech-to-text REST service";
+      description = "GigaAM speech-to-text REST service";
       documentation = [ "https://github.com/salute-developers/GigaAM" ];
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
@@ -131,8 +125,6 @@ in
         GIGAAM_HOST = cfg.host;
         GIGAAM_PORT = toString cfg.port;
         GIGAAM_CACHE_DIR = "/var/lib/giga-stt/models";
-        GRANITE_MODEL = cfg.graniteModel;
-        GRANITE_CACHE_DIR = "/var/lib/giga-stt/models/huggingface";
         GIGAAM_VAD_BACKEND = cfg.vadBackend;
         GIGAAM_FR_BATCH_SIZE = toString cfg.frBatchSize;
         GIGAAM_DIARIZATION = cfg.diarization;
