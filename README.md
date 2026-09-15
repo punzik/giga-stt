@@ -226,6 +226,31 @@ dc logs --tail 50 giga-stt     # last 50 lines
 # interactive API docs: http://localhost:8000/docs
 ```
 
+### Change the published port
+
+The service is published on host port **8000** via the `ports:` mapping in
+`docker/docker-compose.yml`. The mapping is `host:container` — the left part is
+the host port, the right part is the port uvicorn listens on inside the container
+(always 8000, no need to touch it).
+
+```yaml
+    ports:
+      - "8000:8000"   # host(8000) : container(8000)
+      # host(9000) : container(8000):
+      - "9000:8000"
+```
+
+To publish on a different host port, edit the left number and recreate the
+container (no image rebuild needed):
+
+```bash
+cd giga-stt && dc up -d
+```
+
+Now the API is at `http://localhost:9000` (and `/docs`, `/health` follow). The
+internal port and the `HEALTHCHECK` are unchanged, so this is purely a host-side
+change.
+
 ### Update to a new version
 
 Pull the updated sources, rebuild the image and recreate the container:

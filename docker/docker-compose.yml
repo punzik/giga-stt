@@ -9,6 +9,9 @@ services:
         INSTALL_DIARIZATION: "1"
     container_name: giga-stt
     ports:
+      # host:container — change the host (left) part to expose the service on a
+      # different host port; the container keeps listening on the internal 8000.
+      #   e.g. publish on host port 9000:     - "9000:8000"
       - "8000:8000"
     environment:
       # Model: v3_e2e_rnnt (default), v3_rnnt, v3_ctc, v3_e2e_ctc…
