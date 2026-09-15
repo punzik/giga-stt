@@ -1,7 +1,9 @@
 services:
   giga-stt:
     build:
-      context: .
+      # Build from the repository root (the Dockerfile copies pyproject/../giga_stt).
+      context: ..
+      dockerfile: docker/Dockerfile
       args:
         # 1 = install the pyannote speaker-diarization dependencies
         INSTALL_DIARIZATION: "1"
@@ -26,15 +28,12 @@ services:
     volumes:
       - giga-stt-models:/models
     restart: unless-stopped
-    # --- NVIDIA GPU -------------------------------------------------------
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    # For a CPU-only run, comment out the deploy block above and set:
+    # --- NVIDIA GPU (CDI) --------------------------------------------------
+    # CDI (nvidia-container-toolkit + daemon features.cdi); equivalent to
+    # `docker run --device nvidia.com/gpu=all`.
+    devices:
+      - nvidia.com/gpu=all
+    # For a CPU-only run, comment out the devices block above and set:
     #   GIGAAM_DEVICE: cpu
 
 volumes:

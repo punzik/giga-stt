@@ -6,9 +6,9 @@
   сервис на :8010 — все сценарии пройдены (см. таблицу ниже).
 - Найден и исправлен баг маппинга: доминирующий спикер считался как максимум по
   **одному** turn'у, а не как **сумма** перекрытий по спикеру (`_dominant_speaker`).
-- Не проверено: Nix-сборка (`nix build .#giga-stt`) — требует пересборки пакета;
-  pyannote-VAD (segmentation-3.0) отдаёт 403 с текущим HF-токеном (terms не приняты
+- pyannote-VAD (segmentation-3.0) отдаёт 403 с текущим HF-токеном (terms не приняты
   для этой модели) — сервис корректно падает на silero, на диаризацию не влияет.
+- Nix-сборка удалена (оставлен только docker-запуск).
 
 Тесты (GTX 1660 SUPER):
 
@@ -40,8 +40,7 @@
   работают под 4.0.7 → pyannote-VAD для нарезки длинного аудио остаётся жив.
 - torchcodec импортится в pyannote.audio **лениво** (try/except + warning); без него
   in-memory waveform всё равно работает. Требует FFmpeg-библиотеки в LD_LIBRARY_PATH.
-- Nix: в зафиксированных флейком nixpkgs уже есть `pyannote-audio 4.0.4` (полный стек)
-  и `torchcodec 0.11.1` → одна строка в package.nix.
+-- (Nix-сборка удалена — остаётся только docker-путь; см. `docker/`.)
 
 ## Шаги
 
@@ -57,12 +56,10 @@
 6. **`giga_stt/app.py`** — query/form-параметр `with_speakers` (default false) на обоих
    endpoints; 400 если backend выключен, 503 если грузится/ошибка; `/health` — поле
    `diarization`; запуск `start_loading()` при старте.
-7. **`docker/`** — build-arg `INSTALL_DIARIZATION` (pip extra), env `GIGAAM_DIARIZATION`,
-   `PYANNOTE_METRICS_ENABLED=0`.
-8. **`nix/package.nix`** — `python3Packages.pyannote_audio` в propagatedBuildInputs;
-   **`nix/default.nix`** (модуль NixOS, подключается каталогом) — env-переменные сервиса.
-9. **`README.md`** — раздел «Speaker diarization»: включение, API, цены, Nix/Docker.
-10. **Смоук-тест** — venv в /tmp (torch 2.8 + extra + `pip install -e .`), запуск сервиса,
+7. **`docker/Dockerfile`** — build-arg `INSTALL_DIARIZATION` (pip extra), env
+   `GIGAAM_DIARIZATION`, `PYANNOTE_METRICS_ENABLED=0`. *(Nix-модуль удалён.)*
+8. **`README.md`** — раздел «Speaker diarization»: включение, API, цены, Docker.
+9. **Смоук-тест** — venv в /tmp (torch 2.8 + extra + `pip install -e .`), запуск сервиса,
     curl с `with_speakers=true`, проверка speaker'ов в segments.
 
 ## API

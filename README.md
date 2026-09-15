@@ -137,8 +137,7 @@ print(r.json()["text"])
 ## Running locally
 
 Requirements: Python ≥ 3.10, NVIDIA GPU with the driver installed (or CPU),
-ffmpeg in PATH (on NixOS the service finds ffmpeg in the nix-store on its own;
-otherwise set `GIGAAM_FFMPEG_PATH=/path/to/ffmpeg`).
+ffmpeg in PATH (or set `GIGAAM_FFMPEG_PATH=/path/to/ffmpeg`).
 
 ```bash
 # virtual environment (torch 2.8.0 wheels come from the pip cache, if present)
@@ -161,7 +160,10 @@ wget -O example.wav "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/example
 
 ## Running in Docker (GPU)
 
-Requires the NVIDIA driver and nvidia-container-toolkit to be installed.
+Requires the NVIDIA driver and nvidia-container-toolkit on the host, with Docker's
+CDI support enabled (`features.cdi=true`, e.g. NixOS `hardware.nvidia-container-toolkit.enable`).
+The compose file passes the GPU to the container via CDI (`nvidia.com/gpu=all` —
+the equivalent of `docker run --device nvidia.com/gpu=all`).
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d --build
@@ -177,7 +179,14 @@ Speaker diarization is built into the image by default
 compose file) — it needs `HF_TOKEN` with accepted terms for the gated model;
 without the token the ASR service works and `diarization` in `/health` shows the error.
 
-CPU-only: comment out the `deploy` block in `docker/docker-compose.yml` and set
+Direct run without compose:
+
+```bash
+docker run --rm --device nvidia.com/gpu=all -p 8000:8000 \
+  -e GIGAAM_DEVICE=cuda docker-giga-stt
+```
+
+CPU-only: comment out the `devices` block in `docker/docker-compose.yml` and set
 `GIGAAM_DEVICE=cpu` (inference is noticeably slower).
 
 ---
