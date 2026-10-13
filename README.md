@@ -166,7 +166,7 @@ Docker is the recommended way to run giga-stt. All examples use
 drives the GPU via CDI but can run on CPU (see [CPU-only](#cpu-only)).
 
 The image is built **from the remote git repository**
-`https://git.embddr.xyz/np/giga-stt.git` (git build context), not from the local
+`https://github.com/punzik/giga-stt.git` (git build context), not from the local
 working copy — so the sources must be pushed to that repo before an update is
 picked up. The build is pinned to a ref with the `#ref` suffix in the compose file
 (currently `#main`).
